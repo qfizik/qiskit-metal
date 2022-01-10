@@ -29,6 +29,8 @@ renderers_to_load = Dict(
              class_name='QQ3DRenderer'),
     gds=Dict(path_name='qiskit_metal.renderers.renderer_gds.gds_renderer',
              class_name='QGDSRenderer'),
+    empro=Dict(path_name='qiskit_metal.renderers.renderer_keysight.empro_renderer',
+                  class_name='QEMProRenderer'),
 )
 """
 Define the renderes to load. Just provide the module names here.
