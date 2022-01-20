@@ -19,7 +19,7 @@ import os
 import geopandas
 import shapely
 
-from shapely.geometry import LineString as LineString
+from shapely.geometry import LineString, mapping
 from copy import deepcopy
 from operator import itemgetter
 from typing import TYPE_CHECKING
@@ -144,118 +144,45 @@ class QEMProRenderer(QRenderer):
                             f'File:"{file}" not written.'
                             f' Checked directory:"{directory_name}".')
         return 0
+    
+    def render_poly(self):
+        """This function finds all polygons in the current design and renders them to EMPro python script"""
+        
+        table = self.design.qgeometry.tables['poly']  
+        
+        coords = []
+        for index, row in table.iterrows():
+            coords_new = list(row['geometry'].exterior.coords)
+            coords.append(coords_new)
 
-    def check_qcomps(self,
-                     highlight_qcomponents: list = []) -> Tuple[list, int]:
-        """Confirm the list doesn't have names of componentes repeated. Comfirm
-        that the name of component exists in QDesign.
+        # Remove last tuple from each list
+        rect = [] 
+        for item in coords:
+            rect_new = item[0:-1] 
+            rect.append(rect_new) 
+            
+            
+        # Add zero to each tuple to make it compatible with the EMPro format
+        rect_mod = []
+        for i in rect:
+            for j in i:
+                rect_mod_new = j + (0.0,)
+                rect_mod.append(rect_mod_new)
+                
+        # Get the original number of elements in the geometry then split the list 
+        x = index
+        j = 0
+        vertices = [0]*x
+        for i in range(x):
+            vertices[i] = rect_mod[j:j+4]
+            j += 4
 
-        Args:
-            highlight_qcomponents (list, optional): List of strings which denote the name of QComponents to render.
-                                                     Defaults to []. Empty list means to render entire design.
+        return vertices
 
-        Returns:
-            Tuple[list, int]:
-            list: Unique list of QComponents to render.
-            int: 0 if all ended well. Otherwise, 1 if QComponent name not in design.
-        """
-        # Remove identical QComponent names.
-        unique_qcomponents = list(set(highlight_qcomponents))
-
-        # Confirm all QComponent are in design.
-        for qcomp in unique_qcomponents:
-            if qcomp not in self.design.name_to_id:
-                self.logger.warning(
-                    f'The component={qcomp} in highlight_qcomponents not'
-                    ' in QDesign. The GDS data not generated.')
-                return unique_qcomponents, 1
-
-        # For Subtraction bounding box.
-        # If list passed to export is the whole chip, then want to use the bounding box from design planar.
-        # If list is subset of chip, then caluclate a custom bounding box and scale it.
-
-        if len(unique_qcomponents) == len(self.design._components):
-            # Since user wants all of the chip to be rendered, use the design.planar bounding box.
-            unique_qcomponents[:] = []
-
-        return unique_qcomponents, 0
-
-    def get_qgeometry_tables_for_empro(self,
-                                          highlight_qcomponents: list = []
-                                         ) -> Tuple[int, list]:
-        """Using self.design, this method does the following:
-
-        1. Gather the QGeometries to be used to write to file.
-           Duplicate names in hightlight_qcomponents will be removed without warning.
-
-        Args:
-            highlight_qcomponents (list): List of strings which denote the name of QComponents to render.
-                                        If empty, render all comonents in design.
-                                        If QComponent names are dupliated, duplicates will be ignored.
-
-        Returns:
-            Tuple[int, list]:
-            int: 0 if all ended well. Otherwise, 1 if QComponent name(s) not in design.
-            list: The names of QGeometry tables used for highlight_qcomponentes.
-        """
-        unique_qcomponents, status = self.check_qcomps(highlight_qcomponents)
-        table_names_for_highlight = list()
-
-        if status == 1:
-            return 1, table_names_for_highlight
-        for chip_name in self.chip_info:
-            for table_name in self.design.qgeometry.get_element_types():
-                # Get table for chip and table_name, and reduce to keep just the list of unique_qcomponents.
-                table = self.get_table(table_name, unique_qcomponents,
-                                       chip_name)
-
-                # A place where a logic can happen, for each table, within a chip.
-
-                # Demo for skeleton QRenderer.
-                if len(table) != 0:
-                    table_names_for_highlight.append(table_name + '\n')
-
-        return 0, table_names_for_highlight
-
-    def get_table(self, table_name: str, unique_qcomponents: list,
-                  chip_name: str) -> geopandas.GeoDataFrame:
-        """If unique_qcomponents list is empty, get table using table_name from
-        QGeometry tables for all elements with table_name.  Otherwise, return a
-        table with fewer elements, for just the qcomponents within the
-        unique_qcomponents list.
-
-        Args:
-            table_name (str): Can be "path", "poly", etc. from the QGeometry tables.
-            unique_qcomponents (list): User requested list of component names to export to GDS file.
-
-        Returns:
-            geopandas.GeoDataFrame: Table of elements within the QGeometry.
-        """
-
-        # self.design.qgeometry.tables is a dict. key=table_name, value=geopandas.GeoDataFrame
-        if len(unique_qcomponents) == 0:
-            table = self.design.qgeometry.tables[table_name]
-        else:
-            table = self.design.qgeometry.tables[table_name]
-            # Convert string QComponent.name  to QComponent.id
-            highlight_id = [
-                self.design.name_to_id[a_qcomponent]
-                for a_qcomponent in unique_qcomponents
-            ]
-
-            # Remove QComponents which are not requested.
-            table = table[table['component'].isin(highlight_id)]
-
-        table = table[table['chip'] == chip_name]
-
-        return table
-
-    def write_qgeometry_table_names_to_file(self,
-                                            file_name: str,
-                                            highlight_qcomponents: list = []
-                                           ) -> int:
-        """Obtain the names of the QGeometry Pandas tables and write them to a
-        file. The names will be for qcomponents that were selected or all of
+    def render_final_components(self,
+                          file_name: str) -> int:
+        """Write out a file that can be used as an input by EMPro.
+        The names will be for qcomponents that were selected or all of
         the qcomponents within the qdesign.
 
         Args:
@@ -265,50 +192,36 @@ class QEMProRenderer(QRenderer):
                                         If empty, render all qcomponents in qdesign.
 
         Returns:
-            int: 0=file_name can not be written, otherwise 1=file_name has been written
+            int: 0=components can not be written to file, otherwise 1=components have been written
         """
 
         if not self._can_write_to_path(file_name):
             return 0
 
         self.chip_info.clear()
+        vertices = self.render_poly()
+        
+        intialization_text = ['#Clear project space and start fresh'  + '\n',
+                              'import empro' + '\n',
+                              'empro.activeProject.clear()' + '\n',
+                              'from empro.geometry import Sketch' + '\n',
+                              'from empro.toolkit.geometry import sheetBody' + '\n',
+                              'from empro.toolkit.via_designer.geometry import makePolygon, makePolyLine' + '\n'+ '\n',
+                              "def makeSheetBody(listOfPolygonsByVertices, name=''):" + '\n',
+                              '\t' + 'sketch = Sketch()' + '\n',
+                              '\t' + 'for polygonVertices in listOfPolygonsByVertices:' + '\n',
+                              '\t' + '\t' + 'makePolygon(polygonVertices,sketch)' + '\n',
+                              '\t' + 'return sheetBody(sketch,name)' + '\n'+ '\n']
+        
+        add_geometries_text = [f'empro.activeProject.geometry.append(makeSheetBody({vertices},"Polygons"))']
+        
+        #Iterate through tables and render components
+            
 
-        # Just for demo, a new plug-in may not need this.
-        self.chip_info.update(self.get_chip_names())
+        
+        empro_out = open(file_name, 'w')
+        empro_out.writelines(intialization_text)
+        empro_out.writelines(add_geometries_text)
+        empro_out.close()
 
-        status, table_names_used = self.get_qgeometry_tables_for_empro(highlight_qcomponents)
-
-        # The method parse_value, returns a float.
-        total_height = str(int(self.parse_value(self.options.height)))
-
-        total_height_text = 'Height:  ' + total_height + '\n'
-
-        if (status == 0):
-            empro_out = open(file_name, 'w')
-            empro_out.writelines(total_height_text)
-            empro_out.writelines(table_names_used)
-            empro_out.close()
-            return 1
-        else:
-            return 0
-
-    def get_chip_names(self) -> Dict:
-        """Returns a dict of unique chip names for ALL tables within QGeometry.
-        In another words, for every "path" table, "poly" table ... etc, this
-        method will search for unique chip names and return a dict of unique
-        chip names from QGeometry table.
-
-        Returns:
-            Dict: dict with key of chip names and value of empty dict to hold things for renderers.
-        """
-        chip_names = Dict()
-        for table_name in self.design.qgeometry.get_element_types():
-            table = self.design.qgeometry.tables[table_name]
-            names = table['chip'].unique().tolist()
-            chip_names += names
-        unique_list = list(set(chip_names))
-
-        unique_dict = Dict()
-        for chip in unique_list:
-            unique_dict[chip] = Dict()
-        return unique_dict
+        
