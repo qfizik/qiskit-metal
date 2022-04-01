@@ -34,7 +34,8 @@ import importlib
 import inspect
 import os
 import random
-from collections import OrderedDict, Callable
+from collections import OrderedDict
+from collections.abc import Callable
 from inspect import signature
 from pathlib import Path
 from typing import TYPE_CHECKING, Union, Type
